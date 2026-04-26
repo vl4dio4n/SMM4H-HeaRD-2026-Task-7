@@ -1,0 +1,42 @@
+# Exp 06 is a meta-experiment: re-run the winning encoder-only config
+# with three different seeds, then majority-vote per token at inference.
+# The three seeds below share everything except the `seed` field.
+
+experiment_name: exp_06_ensemble
+pipeline: direct
+
+encoder:
+  model_name: microsoft/deberta-v3-base
+  num_labels: 5
+  max_len: 256
+  use_crf: true
+  dropout: 0.1
+
+loss:
+  type: ce
+
+optimizer:
+  base_lr: 3.0e-5
+  weight_decay: 0.01
+  use_llrd: true
+  llrd_decay: 0.9
+
+training:
+  epochs: 25
+  batch_size: 16
+  eval_batch_size: 32
+  warmup_ratio: 0.1
+  grad_clip: 1.0
+  seed: 42         # trainer uses this; change to 123 and 999 for the other two runs
+  num_workers: 2
+  bf16: false   # DeBERTa-v3 is unstable under bf16 autocast (NaN losses); train in fp32.
+
+ensemble:
+  seeds: [42, 123, 999]
+  vote: majority
+
+data:
+  train_path: datasets/new_train_data.csv
+  dev_path:   datasets/new_dev_data.csv
+
+output_dir: out/experiments/exp_06_ensemble

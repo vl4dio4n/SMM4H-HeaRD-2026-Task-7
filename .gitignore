@@ -1,0 +1,51 @@
+# --- Report (excluded as a whole) ----------------------------------------
+report/
+
+# --- Project plan (kept local) -------------------------------------------
+PLAN.md
+
+# --- LaTeX build artefacts (anywhere in the tree) ------------------------
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.nav
+*.out
+*.snm
+*.synctex.gz
+*.toc
+*.vrb
+*.bcf
+*.run.xml
+
+# Stray pdflatex log files left at the repo root by ad-hoc compilations
+build.log
+report.log
+texput.log
+
+# --- Python --------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.eggs/
+.ipynb_checkpoints/
+
+# --- Environments / secrets ---------------------------------------------
+.env
+.venv/
+venv/
+env/
+
+# --- Experiment outputs (very large: checkpoints, plots, caches) --------
+out/
+
+# --- IDE / OS noise -----------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+PLAN.md

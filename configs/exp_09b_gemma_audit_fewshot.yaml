@@ -1,0 +1,31 @@
+# Exp 09b — Gemma-3-12B + audit + FEW-SHOT (k=4 per class + k=4 Neither).
+# Encoder: reuses the 5-class DeBERTa+CRF from exp_04 (no re-training).
+experiment_name: exp_09b_gemma_audit_fewshot
+pipeline: audit
+
+encoder:
+  model_name: microsoft/deberta-v3-base
+  num_labels: 5
+  max_len: 256
+  use_crf: true
+  dropout: 0.1
+
+llm:
+  kind: causal
+  model_name: google/gemma-3-12b-it
+  quantization: 4bit
+  max_context_chars: 2000
+  max_span_chars: 200
+
+few_shot:
+  k_per_class: 4
+  include_neither: true
+  seed: 42
+  max_post_chars: 600
+  max_span_chars: 120
+
+data:
+  train_path: datasets/new_train_data.csv
+  dev_path:   datasets/new_dev_data.csv
+
+output_dir: out/experiments/exp_09b_gemma_audit_fewshot

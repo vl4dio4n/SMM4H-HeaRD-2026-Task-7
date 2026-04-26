@@ -1,0 +1,25 @@
+experiment_name: exp_10b_deberta_svm_audit
+pipeline: svm_audit
+
+# Re-uses the 5-class DeBERTa+CRF detector trained in exp_04.
+encoder:
+  model_name: microsoft/deberta-v3-base
+  num_labels: 5
+  max_len: 256
+  use_crf: true
+  dropout: 0.1
+
+svm:
+  encoder_exp_dir: out/experiments/exp_04_deberta_crf
+  n_pca: 128
+  cv_folds: 5
+  C_grid: [0.1, 1.0, 10.0]
+  gamma_grid: ["scale", 0.01, 0.1]
+  overlap_ratio: 0.25
+
+data:
+  train_path: datasets/new_train_data.csv
+  dev_path:   datasets/new_dev_data.csv
+  test_path:  datasets/new_test_data.csv
+
+output_dir: out/experiments/exp_10b_deberta_svm_audit

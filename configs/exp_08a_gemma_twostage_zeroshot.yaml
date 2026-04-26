@@ -1,0 +1,24 @@
+# Exp 08a — Gemma-3-12B + two-stage + ZERO-SHOT.
+# Encoder: reuses the 3-class DeBERTa from exp_05a (no re-training).
+experiment_name: exp_08a_gemma_twostage_zeroshot
+pipeline: two_stage
+
+encoder:
+  model_name: microsoft/deberta-v3-base
+  num_labels: 3
+  max_len: 256
+  use_crf: false
+  dropout: 0.1
+
+llm:
+  kind: causal
+  model_name: google/gemma-3-12b-it
+  quantization: 4bit
+  max_context_chars: 2000
+  max_span_chars: 200
+
+data:
+  train_path: datasets/new_train_data.csv
+  dev_path:   datasets/new_dev_data.csv
+
+output_dir: out/experiments/exp_08a_gemma_twostage_zeroshot

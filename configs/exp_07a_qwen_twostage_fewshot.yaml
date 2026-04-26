@@ -1,0 +1,31 @@
+# Exp 07a — Qwen-2.5-7B + two-stage + FEW-SHOT (k=4 per class + k=4 Neither).
+# Encoder: reuses the 3-class DeBERTa from exp_05a (no re-training).
+experiment_name: exp_07a_qwen_twostage_fewshot
+pipeline: two_stage
+
+encoder:
+  model_name: microsoft/deberta-v3-base
+  num_labels: 3
+  max_len: 256
+  use_crf: false
+  dropout: 0.1
+
+llm:
+  kind: causal
+  model_name: Qwen/Qwen2.5-7B-Instruct
+  quantization: 4bit
+  max_context_chars: 2000
+  max_span_chars: 200
+
+few_shot:
+  k_per_class: 4
+  include_neither: true
+  seed: 42
+  max_post_chars: 600
+  max_span_chars: 120
+
+data:
+  train_path: datasets/new_train_data.csv
+  dev_path:   datasets/new_dev_data.csv
+
+output_dir: out/experiments/exp_07a_qwen_twostage_fewshot
