@@ -1,0 +1,300 @@
+\documentclass[11pt]{article}
+
+% Switch ``review'' to ``final'' for the camera-ready version.
+\usepackage[review]{acl}
+
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{inconsolata}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+
+% TODO: replace [Team Name] before camera-ready.
+\title{vl4dio4n at \#SMM4H-HeaRD 2026 Task~7:\\
+  Comparing Encoder-, LLM-, and SVM-Based NER Pipelines for
+  Substance-Use Impact Detection}
+
+\author{Anonymous Submission}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We describe our submission to SMM4H-HeaRD~2026 Task~7, which asks
+systems to label \texttt{ClinicalImpacts} and \texttt{SocialImpacts}
+spans in Reddit posts about non-medical substance use. We compare
+four pipeline shapes built on the same DeBERTa-v3-base backbone:
+(i)~a direct $5$-class encoder with a linear-chain CRF head, (ii)~a
+two-stage detect-then-classify pipeline that delegates span typing
+to an instruction-tuned LLM (Qwen2.5-7B or Gemma-3-12B, $4$-bit
+NF4), (iii)~an audit pipeline in which the same LLM verifies the
+encoder's predictions, and (iv)~a classical-ML variant that replaces
+the LLM with an SVM trained on encoder span embeddings. Across
+$16$~configurations, the encoder-only \emph{DeBERTa-v3 + CRF}
+configuration is the strongest single system on the official test
+split, reaching $45.4\%$ strict and $54.2\%$ relaxed F1 --- $+8.6$ /
+$+5.3$ points above a \texttt{mental-roberta-base} baseline. LLM
+audits give a small dev gain that does not transfer to test.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:introduction}
+
+SMM4H-HeaRD~2026 Task~7~\cite{dey2025inference} releases a corpus of
+Reddit posts about non-medical opioid use, annotated under a
+$5$-label BIO scheme that distinguishes
+\texttt{ClinicalImpacts} (e.g.\ \emph{withdrawal}, \emph{rehab})
+from \texttt{SocialImpacts} (e.g.\ \emph{lost my job},
+\emph{homeless}). Systems are scored with strict micro-F1 and a
+relaxed overlap F1 in the CoNLL-2003
+style~\cite{tjong2003conll}, computed by \texttt{seqeval}.
+
+Our submission is a comparative study, not a single architectural
+proposal. We fix the encoder backbone to \texttt{DeBERTa-v3-base}
+\cite{he2023debertav3} and vary what sits on top of it, asking two
+questions. \textbf{RQ1.} Does decoupling span detection from span
+typing improve over a well-decoded $5$-class CRF? \textbf{RQ2.} Does
+adding an LLM or SVM auditor on top of the CRF recover any
+appreciable F1?
+
+We answer both questions with a $16$-row ablation
+(Table~\ref{tab:ablation}). The encoder-only DeBERTa-v3 + CRF
+configuration is the strongest \emph{single} system on the test
+split, and none of the LLM- or SVM-augmented variants improves on
+it. A $4$-shot Gemma-3-12B audit obtains the best dev strict F1 but
+loses to the encoder on test, which we attribute to the
+distributional shift between dev and test on this corpus.
+% The full source code, configuration files and trained-model
+% checkpoints are available at
+% \url{https://github.com/vl4dio4n/SMM4H-HeaRD-2026-Task-7}
+% (URL anonymised during review; uncomment for the camera-ready version).
+
+\section{Data}
+\label{sec:data}
+
+The released corpus consists of $842$ training posts ($\sim$$17.2$K
+tokens), $258$ development posts ($\sim$$5.2$K tokens), and $278$
+test posts ($\sim$$6.2$K tokens). The training and development CSVs
+contain (mostly) one row per post; the test CSV is aggressively
+segmented into $1.7$K sentence-level rows, which forces inference to
+run on shorter contexts than training. The $5$ BIO labels are
+heavily imbalanced: the \texttt{O} tag accounts for $\sim$$94\%$ of
+all training tokens (a $\sim$$16{:}1$ ratio against entity tokens).
+On train and dev, \texttt{ClinicalImpacts} spans outnumber
+\texttt{SocialImpacts} spans by $\sim$$3{:}1$, but on the test set
+the ratio inverts and \texttt{SocialImpacts} becomes the majority
+class --- a shift we revisit in
+Sec.~\ref{sec:results}. The test set is also noticeably more
+first-person ($\sim$$71\%$ of segments) than train or
+dev ($\sim$$45\%$).
+
+\section{System Description}
+\label{sec:system}
+
+We compare four pipelines, all built around the same DeBERTa-v3
+backbone fine-tuned with a maximum sequence length of $256$, batch
+size $16$, $20$ epochs, $10\%$ linear warm-up and a base learning
+rate of $2{\times}10^{-5}$.
+
+\paragraph{Direct + CRF (Exp~04, our main system).} The encoder
+predicts $5$-class BIO tags directly. A linear-chain
+CRF~\cite{lafferty2001crf,lample2016neural} on top of the encoder
+replaces token-level cross-entropy with the CRF negative
+log-likelihood and decodes via Viterbi at inference. The CRF rules
+out illegal BIO transitions, which mainly cleans up boundaries (and
+hence strict F1) without changing the set of detected entity
+regions. We add Layer-wise Learning-Rate
+Decay~\cite{howard2018ulmfit} with multiplier $0.9$ to stabilise
+DeBERTa fine-tuning. This configuration is our final Codabench
+submission.
+
+\paragraph{Two-stage with LLM span typer (Exp~05a, 07a, 08a, 09a).}
+The encoder is re-trained on a collapsed $3$-class label set
+($\{\texttt{O}, \texttt{B-Imp}, \texttt{I-Imp}\}$) and only detects
+span boundaries; an instruction-tuned LLM types each predicted span
+as \texttt{ClinicalImpacts}, \texttt{SocialImpacts}, or
+\texttt{Neither}. We use focal loss~\cite{lin2017focal} ($\gamma{=}2$)
+to handle class imbalance in the detector, since the CRF is no
+longer in charge of the $5$-class structure.
+
+\paragraph{Audit with LLM verifier (Exp~05b, 07b, 08b, 09b).} The
+$5$-class DeBERTa-v3 + CRF detector of Exp~04 produces a full BIO
+tagging; the LLM is shown the encoder's predicted span and label as
+a hint and may verify, correct (Clinical~$\leftrightarrow$~Social),
+or reject it (mark as Neither, which removes the span). Audit and
+two-stage share the same prompt template and class
+descriptions; only the candidate construction differs.
+
+\paragraph{LLM details.} We use
+\texttt{Qwen/Qwen2.5-7B-Instruct} and
+\texttt{google/gemma-3-12b-it}, loaded in $4$-bit NF4 precision via
+\texttt{bitsandbytes}~\cite{dettmers2023qlora} so that both fit on a
+single consumer GPU. Decoding is greedy and capped at $6$ new
+tokens; the post is truncated to $2{,}000$ characters and the
+candidate span to $200$. We compare zero-shot prompting with
+$4$-shot in-context learning~\cite{brown2020fewshot}; few-shot
+demonstrations are mined from gold training spans and balanced
+across the three classes (one per class plus one randomly drawn
+\texttt{Neither}).
+
+\paragraph{SVM-augmented variant (Exp~10a/10b).} To isolate how much
+of the LLM's contribution comes from world knowledge that is not
+already linearly accessible from the encoder, we replace the LLM
+with an SVM~\cite{cortes1995svm}. Each candidate span is represented
+by the mean-pooled hidden state of its tokens in the (frozen)
+fine-tuned encoder; a
+\texttt{StandardScaler}\,$\rightarrow$\,\texttt{PCA(128)}\,$\rightarrow$\,\texttt{SVC(RBF, class\_weight=balanced)}
+pipeline is fitted with $5$-fold grid-searched macro-F1 over $C$
+and $\gamma$.
+
+\paragraph{Baseline.} For comparability we keep the
+\texttt{mental-roberta-base}~\cite{ji2022mentalbert} +
+cross-entropy, $5$-class direct configuration as our internal
+baseline (Exp~01); it is a RoBERTa~\cite{liu2019roberta} variant
+adapted to mental-health Reddit text and is the natural starting
+point given the domain.
+
+\section{Experiments}
+\label{sec:experiments}
+
+We report the full $16$-row ablation in
+Table~\ref{tab:ablation}. Each row pairs a pipeline shape (Pipe:
+\texttt{D}~direct, \texttt{2S}~two-stage, \texttt{Au}~audit,
+\texttt{Ens}~ensemble, \texttt{2S/Au+SVM}~SVM-augmented
+two-stage/audit), a backbone, a loss function, and an external span
+classifier when applicable. ``Dev'' columns are computed on the
+official $258$-row development split with \texttt{seqeval};
+``Test'' columns are the official Codabench leaderboard scores
+returned for the corresponding submission.
+
+\begin{table*}[!t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{l l l l c l c c c c}
+\toprule
+\textbf{Exp} & \textbf{Pipe} & \textbf{Backbone} & \textbf{Loss}
+& \textbf{CRF} & \textbf{External classifier}
+& \textbf{Dev~S} & \textbf{Dev~R} & \textbf{Test~S} & \textbf{Test~R} \\
+\midrule
+01  & D    & mental-roberta-base        & CE      & N & ---                       & 0.356          & 0.489          & 0.368          & 0.489 \\
+02a & D    & mental-roberta-base        & W-CE    & N & ---                       & 0.360          & 0.493          & 0.410          & 0.549 \\
+02b & D    & mental-roberta-base        & Focal   & N & ---                       & 0.339          & 0.492          & 0.336          & 0.507 \\
+03  & D    & deberta-v3-base            & Focal   & N & ---                       & 0.345          & 0.539          & 0.424          & \textbf{0.558} \\
+04  & D    & deberta-v3-base            & CRF NLL & Y & ---                       & 0.413          & \textbf{0.571} & \textbf{0.454} & 0.542 \\
+06  & Ens  & deberta-v3-base $\times 3$ & CRF NLL & Y & ---                       & 0.410          & 0.565          & 0.441          & 0.551 \\
+\midrule
+05a & 2S   & deberta-v3-base (3-cls)    & Focal   & N & Qwen2.5-7B, zero-shot     & 0.394          & 0.423          & 0.421          & 0.449 \\
+05b & Au   & deberta-v3-base            & CRF NLL & Y & Qwen2.5-7B, zero-shot     & 0.386          & 0.541          & 0.443          & 0.549 \\
+07a & 2S   & deberta-v3-base (3-cls)    & Focal   & N & Qwen2.5-7B, $4$-shot      & 0.381          & 0.431          & 0.434          & 0.483 \\
+07b & Au   & deberta-v3-base            & CRF NLL & Y & Qwen2.5-7B, $4$-shot      & 0.380          & 0.537          & 0.440          & 0.552 \\
+08a & 2S   & deberta-v3-base (3-cls)    & Focal   & N & Gemma-3-12B, zero-shot    & 0.382          & 0.421          & 0.395          & 0.418 \\
+08b & Au   & deberta-v3-base            & CRF NLL & Y & Gemma-3-12B, zero-shot    & 0.388          & 0.550          & 0.400          & 0.496 \\
+09a & 2S   & deberta-v3-base (3-cls)    & Focal   & N & Gemma-3-12B, $4$-shot     & 0.408          & 0.438          & 0.428          & 0.444 \\
+09b & Au   & deberta-v3-base            & CRF NLL & Y & Gemma-3-12B, $4$-shot     & \textbf{0.426} & 0.567          & 0.432          & 0.523 \\
+\midrule
+10a & 2S+SVM & deberta-v3-base (3-cls)  & Focal   & N & SVM (RBF, PCA-128)        & 0.357          & 0.367          & 0.433          & 0.435 \\
+10b & Au+SVM & deberta-v3-base          & CRF NLL & Y & SVM (RBF, PCA-128)        & 0.407          & 0.559          & ---            & ---   \\
+\bottomrule
+\end{tabular}
+\caption{Ablation across all $16$ configurations. Pipelines:
+\texttt{D}~=~direct, \texttt{2S}~=~two-stage, \texttt{Au}~=~audit,
+\texttt{Ens}~=~ensemble, \texttt{2S/Au+SVM}~=~SVM-augmented. ``Dev''
+and ``Test'' columns give strict (S) and relaxed (R) F1 on the
+development split and the Codabench test split, respectively.
+Layer-wise LR Decay is enabled for all DeBERTa-v3 runs (Exp~03 and
+above). Best per metric in \textbf{bold}.}
+\label{tab:ablation}
+\end{table*}
+
+\section{Results and Discussion}
+\label{sec:results}
+
+\paragraph{Encoder choices and CRF dominate.} Switching the
+backbone from \texttt{mental-roberta-base} (Exp~01) to
+\texttt{deberta-v3-base} with focal loss and LLRD (Exp~03) is the
+single largest step on test relaxed F1 ($+6.9$ over Exp~01).
+Adding the CRF head (Exp~04) gives a further $+3.0$ test strict
+points and reduces the strict-relaxed gap from $19.4$ pts (Exp~03,
+dev) to $8.8$ pts on test, confirming that the CRF mainly cleans up
+span boundaries rather than discovering new entities. Exp~04 is the
+only configuration that exceeds $0.45$ test strict F1 across the
+entire ablation.
+
+\paragraph{LLM auditing helps on dev, not on test.} The strongest
+LLM configuration is \emph{audit + Gemma-3-12B + 4-shot} (Exp~09b),
+which reaches $0.426$ dev strict F1 --- the highest in the table ---
+but only $0.432$ test strict, $\sim$$2$ points below Exp~04. The
+two-stage shapes consistently lose to the audit shapes at relaxed
+F1 because the $3$-class detector finds slightly worse spans than
+the $5$-class CRF and the LLM cannot fix upstream boundary errors.
+Within prompting regimes, $4$-shot in-context demonstrations help
+Gemma (e.g.\ $+3.8$ dev strict on the audit pipeline) but slightly
+hurt Qwen ($-0.6$ dev strict), suggesting that the larger model
+extracts more signal from demonstrations.
+
+\paragraph{SVM auditing is essentially neutral.} The audit SVM
+(Exp~10b) preserves the Exp~04 dev numbers ($0.407$ strict /
+$0.559$ relaxed) and reaches a $5$-fold macro-F1 of $1.0$ on gold
+training embeddings: the two impact classes are linearly separable
+in the CRF encoder's feature space, so the SVM rarely overrides
+the encoder. This is the cleanest evidence in our ablation that
+the LLM's added value over the CRF is bounded by the linear
+information already present in the encoder representation.
+
+\paragraph{Recall is the bottleneck.} Across the entire ablation,
+relaxed precision climbs from $0.58$ (Exp~01) to $0.73$ (Exp~09b)
+on dev, while relaxed recall stays in the $0.42$--$0.48$ band. Our
+systems become progressively more conservative but do not discover
+materially more gold spans. Combined with the train/dev~vs.~test
+class flip (\texttt{ClinicalImpacts} majority on train/dev,
+\texttt{SocialImpacts} majority on test), this explains why the
+dev-best configuration (Exp~09b) is not the test-best
+configuration (Exp~04).
+
+\paragraph{Comparison to the organisers' baseline.} Our final
+submission (Exp~04) is $\sim$$7$ relaxed-F1 points behind the
+DeBERTa-large baseline of $\sim$$0.61$ relaxed F1 reported by
+\citet{dey2025inference}. The most plausible drivers of the gap
+are: (i)~we use the \emph{base} variant of every backbone we tried,
+(ii)~our pipeline processes each released CSV row independently and
+therefore cannot recover entities that span multiple sentence-level
+test segments, and (iii)~our $4$-shot demonstrations are sampled by
+class only, with no balancing for narrative perspective or span
+length.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented a controlled comparison of four NER pipeline shapes on
+SMM4H-HeaRD~2026 Task~7. The strongest single system on the
+official test split is a $5$-class DeBERTa-v3 + CRF encoder
+(Exp~04, $0.454$ strict / $0.542$ relaxed F1). LLM and SVM auditing
+on top of the same encoder bring at most a small dev gain that does
+not transfer to test, mostly because the test split shifts to a
+more first-person, \texttt{Social}-heavy distribution that the
+class-only $4$-shot sampler cannot anticipate. Recall on rare
+\texttt{SocialImpacts} expressions remains the dominant failure
+mode, suggesting that a larger backbone, span-merging across
+sentence-level test segments, and perspective-aware in-context
+retrieval are the most promising directions for future work.
+
+\section*{Limitations}
+We use only $4$-shot in-context demonstrations and do not fine-tune
+the LLMs on the auditing task; parameter-efficient fine-tuning on
+the training spans may close the gap to the organisers' baseline.
+Our SVM head is restricted to linear-RBF kernels with
+$128$ PCA components; richer span representations
+(e.g.\ concatenation with first/last token embeddings) were not
+explored. Each released CSV row is processed independently, so our
+pipeline cannot recover impact spans that cross sentence-level
+test segments.
+
+\bibliography{custom}
+
+\end{document}

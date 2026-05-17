@@ -1,5 +1,6 @@
-# --- Report (excluded as a whole) ----------------------------------------
-report/
+# --- Latex auxiliary files ----------------------------------------
+*.sty
+*.bst
 
 # --- Project plan (kept local) -------------------------------------------
 PLAN.md
@@ -48,4 +49,3 @@ out/
 .idea/
 .DS_Store
 Thumbs.db
-PLAN.md
