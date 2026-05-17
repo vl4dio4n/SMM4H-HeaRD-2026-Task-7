@@ -1,7 +1,3 @@
-# --- Latex auxiliary files ----------------------------------------
-*.sty
-*.bst
-
 # --- Project plan (kept local) -------------------------------------------
 PLAN.md
 
@@ -41,8 +37,9 @@ __pycache__/
 venv/
 env/
 
-# --- Experiment outputs (very large: checkpoints, plots, caches) --------
-out/
+# --- Experiment outputs (very large: checkpoints, caches) --------
+out/cache/
+out/experiments/
 
 # --- IDE / OS noise -----------------------------------------------------
 .vscode/
